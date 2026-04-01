@@ -228,6 +228,8 @@ input::-webkit-calendar-picker-indicator { opacity: 0.5; }
   .modal { width: 96%; }
 }
 </style>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-database-compat.js"></script>
 </head>
 <body>
 
@@ -425,10 +427,6 @@ let counters = { matthew: 250, scott: 13 };
 let editingId = null;
 let lineItemCount = 0;
 let previewInvoiceId = null;
-let firebaseDB = null;
-let firebaseSet = null;
-let firebaseRef = null;
-let firebaseOnValue = null;
 let useFirebase = false;
 
 // ── LOGIN ──
@@ -457,9 +455,9 @@ if (sessionStorage.getItem('cc_authed') === '1') {
 function saveData() {
   localStorage.setItem('cc_invoices', JSON.stringify(invoices));
   localStorage.setItem('cc_counters', JSON.stringify(counters));
-  if (useFirebase && firebaseDB && firebaseSet && firebaseRef) {
+  if (useFirebase) {
     setSyncStatus('syncing', 'Saving…');
-    firebaseSet(firebaseRef(firebaseDB, 'invoiceApp'), { invoices, counters })
+    firebase.database().ref('invoiceApp').set({ invoices, counters })
       .then(() => setSyncStatus('synced', 'Synced'))
       .catch(err => { console.error('Firebase write error:', err); setSyncStatus('offline', 'Save failed'); });
   }
@@ -475,7 +473,6 @@ function setSyncStatus(state, label) {
 // ── INIT ──
 function initApp() {
   if (FIREBASE_CONFIG.apiKey === "YOUR_API_KEY") {
-    // Firebase not configured — use localStorage only
     invoices = JSON.parse(localStorage.getItem('cc_invoices') || '[]');
     counters = JSON.parse(localStorage.getItem('cc_counters') || 'null') || { matthew: 250, scott: 13 };
     setSyncStatus('offline', 'Local only');
@@ -483,21 +480,17 @@ function initApp() {
     return;
   }
 
-  // Dynamically load Firebase
   setSyncStatus('syncing', 'Connecting…');
-  Promise.all([
-    import('https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js'),
-    import('https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js')
-  ]).then(([appMod, dbMod]) => {
-    const app = appMod.initializeApp(FIREBASE_CONFIG);
-    firebaseDB = dbMod.getDatabase(app);
-    firebaseSet = dbMod.set;
-    firebaseRef = dbMod.ref;
-    firebaseOnValue = dbMod.onValue;
+  try {
+    // Initialize Firebase using compat SDK (loaded via script tags)
+    if (!firebase.apps.length) {
+      firebase.initializeApp(FIREBASE_CONFIG);
+    }
+    const db = firebase.database();
     useFirebase = true;
 
     // Real-time listener — auto-syncs across all devices
-    firebaseOnValue(firebaseRef(firebaseDB, 'invoiceApp'), (snapshot) => {
+    db.ref('invoiceApp').on('value', (snapshot) => {
       const data = snapshot.val();
       if (data) {
         invoices = data.invoices || [];
@@ -523,13 +516,13 @@ function initApp() {
       setSyncStatus('offline', 'Offline');
       renderList();
     });
-  }).catch(err => {
-    console.error('Firebase load error:', err);
+  } catch(err) {
+    console.error('Firebase init error:', err);
     invoices = JSON.parse(localStorage.getItem('cc_invoices') || '[]');
     counters = JSON.parse(localStorage.getItem('cc_counters') || 'null') || { matthew: 250, scott: 13 };
     setSyncStatus('offline', 'Offline');
     renderList();
-  });
+  }
 }
 
 // ── LIST ──
